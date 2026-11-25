@@ -11,6 +11,10 @@ import (
 	"golang.org/x/term"
 )
 
+// defaultCols is the width assumed when
+// the output is not a terminal.
+const defaultCols = 80
+
 // liveResult is what 1 key asks the live loop
 // to do next.
 type liveResult uint8
@@ -57,8 +61,10 @@ func (in Input) liveLoop(r io.Reader, w io.Writer) (string, error) {
 	e := &editor{}
 	dec := &keyDecoder{}
 	buf := make([]byte, 256)
+	cols := size(w)
 
-	if err := in.drawPrompt(w, e); err != nil {
+	rows, err := in.draw(w, e, "", 0)
+	if err != nil {
 		return "", err
 	}
 
@@ -67,8 +73,8 @@ func (in Input) liveLoop(r io.Reader, w io.Writer) (string, error) {
 		for _, ev := range dec.decode(buf[:n]) {
 			switch applyEvent(ev, e) {
 			case liveCancel:
-				if _, err := io.WriteString(w, "\r\n"); err != nil {
-					return "", err
+				if _, werr := io.WriteString(w, "\r\n\x1b[K"); werr != nil {
+					return "", werr
 				}
 				return "", ErrCanceled
 
@@ -76,20 +82,20 @@ func (in Input) liveLoop(r io.Reader, w io.Writer) (string, error) {
 				value := e.text()
 
 				if verr := in.check(value); verr != nil {
-					if err := in.drawReject(w, e, verr); err != nil {
+					// Leave the last cell free so the message
+					// cannot trigger a deferred wrap
+					msg := in.failLine(verr, cols-1)
+
+					if rows, err = in.draw(w, e, msg, rows); err != nil {
 						return "", err
 					}
 					continue
 				}
 
-				if err := in.drawDone(w, e); err != nil {
-					return "", err
-				}
-
-				return value, nil
+				return value, in.finish(w, value, rows)
 			}
 
-			if err := in.drawPrompt(w, e); err != nil {
+			if rows, err = in.draw(w, e, "", rows); err != nil {
 				return "", err
 			}
 		}
@@ -104,46 +110,73 @@ func (in Input) liveLoop(r io.Reader, w io.Writer) (string, error) {
 	}
 }
 
-// drawPrompt redraws the typing line and puts the cursor back in place.
-func (in Input) drawPrompt(w io.Writer, e *editor) error {
-	return writeFrame(w, in.pendingFrame(e))
+// draw repaints the prompt block and reports how many rows it uses.
+// msg is drawn on a second row; "" clears that row.
+func (in Input) draw(w io.Writer, e *editor, msg string, prev int) (int, error) {
+	f := in.pendingFrame(e)
+	f.msg = msg
+
+	return writeFrame(w, f, prev)
 }
 
-// drawDone replaces the typing line with the final one
-// and starts a new line.
-func (in Input) drawDone(w io.Writer, e *editor) error {
-	_, err := io.WriteString(w, "\r"+in.doneLine(e.text())+"\x1b[K\r\n")
+// finish replaces the block with the accepted line and moves below it,
+// erasing the row the error used.
+func (in Input) finish(w io.Writer, value string, rows int) error {
+	s := "\r" + in.doneLine(value) + "\x1b[K\r\n"
+	if rows > 1 {
+		s += "\x1b[K"
+	}
+
+	_, err := io.WriteString(w, s)
 	return err
 }
 
-// drawReject prints the validation error and
-// reopens the prompt line.
-// The typed text is kept so the user can fix it.
-func (in Input) drawReject(w io.Writer, e *editor, err error) error {
-	if _, werr := io.WriteString(w, "\r\n"+in.failLine(err)+"\r\n"); werr != nil {
-		return werr
+// size reports the output width for the live prompt.
+func size(w io.Writer) int {
+	f, ok := w.(*os.File)
+	if !ok {
+		return defaultCols
 	}
 
-	return in.drawPrompt(w, e)
+	cols, _, err := term.GetSize(int(f.Fd()))
+	if err != nil || cols <= 0 {
+		return defaultCols
+	}
+
+	return cols
 }
 
-// writeFrame overwrites the current line with f
-// and restores the cursor column.
-func writeFrame(w io.Writer, f frame) error {
+// writeFrame repaints f over the block the previous frame used.
+// It reports how many rows the block now occupies.
+//
+// The cursor is placed with CHA so the result does not depend on
+// the column the previous row left behind.
+func writeFrame(w io.Writer, f frame, prev int) (int, error) {
+	rows := 1
+	if f.msg != "" {
+		rows = 2
+	}
+	rows = max(rows, prev)
+
 	var sb strings.Builder
 
 	sb.WriteString("\r")
 	sb.WriteString(f.line)
 	sb.WriteString("\x1b[K")
 
-	if n := f.back(); n > 0 {
-		sb.WriteString("\x1b[")
-		sb.WriteString(strconv.Itoa(n))
-		sb.WriteString("D")
+	if rows > 1 {
+		sb.WriteString("\r\n")
+		sb.WriteString(f.msg)
+		sb.WriteString("\x1b[K")
+		sb.WriteString("\x1b[1A")
 	}
 
+	sb.WriteString("\x1b[")
+	sb.WriteString(strconv.Itoa(f.cursor + 1))
+	sb.WriteString("G")
+
 	_, err := io.WriteString(w, sb.String())
-	return err
+	return rows, err
 }
 
 // applyEvent applies one decoded key to the editor.

@@ -9,21 +9,15 @@ const (
 	sgrDim     = "\x1b[2m"
 )
 
-// frame is one rendered prompt line.
+// frame is one rendered prompt block.
 //
-// line may contain ANSI styling.
-// cursor and width are display columns,
-// counted in terminal cells, never in bytes or runes.
+// line may contain ANSI styling;
+// msg, when not empty, is drawn on a second row and must be plain text.
+// cursor is the cursor cell on line, counted in terminal cells.
 type frame struct {
 	line   string
+	msg    string
 	cursor int
-	width  int
-}
-
-// back reports how many columns to move left
-// to put the cursor in place.
-func (f frame) back() int {
-	return f.width - f.cursor
 }
 
 // pendingFrame for Input renders the line while the user is typing.
@@ -48,7 +42,6 @@ func (in Input) pendingFrame(e *editor) frame {
 		return frame{
 			line:   sb.String(),
 			cursor: cursor,
-			width:  prefix + displayWidth(in.Placeholder),
 		}
 	}
 
@@ -66,7 +59,6 @@ func (in Input) pendingFrame(e *editor) frame {
 	return frame{
 		line:   sb.String(),
 		cursor: cursor,
-		width:  prefix + displayWidth(string(e.buf)),
 	}
 }
 
@@ -76,8 +68,21 @@ func (in Input) doneLine(value string) string {
 }
 
 // failLine is the line shown under the prompt when validation fails.
-func (in Input) failLine(err error) string {
-	return markerText(in.Marker.Fail, "✗") + err.Error()
+func (in Input) failLine(err error, cols int) string {
+	s := markerText(in.Marker.Fail, "✗") + oneLine(err.Error())
+	return cut(s, cols)
+}
+
+// oneLine replaces control chars with spaces
+// so a validator message containing a newline cannot
+// break the block layout.
+func oneLine(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r < byteSpace || r == byteDel {
+			return ' '
+		}
+		return r
+	}, s)
 }
 
 // markerText returns a marker followed by a space.

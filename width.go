@@ -1,6 +1,9 @@
 package miniprompt
 
-import "unicode"
+import (
+	"strings"
+	"unicode"
+)
 
 // displayWidth returns how many terminal cells s occupies.
 // Pass plain text, not text that contains ANSI escapes.
@@ -101,4 +104,31 @@ func isWide(r rune) bool {
 	}
 
 	return false
+}
+
+// cut returns the leading part of s that fits in cols cells.
+// s must not contain ANSI escapes.
+func cut(s string, cols int) string {
+	if cols <= 0 {
+		return ""
+	}
+
+	if displayWidth(s) <= cols {
+		return s
+	}
+
+	var sb strings.Builder
+	n := 0
+
+	for _, r := range s {
+		w := runeWidth(r)
+		if n+w > cols {
+			break
+		}
+
+		sb.WriteRune(r)
+		n += w
+	}
+
+	return sb.String()
 }

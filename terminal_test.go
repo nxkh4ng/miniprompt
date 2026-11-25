@@ -51,7 +51,7 @@ func TestLiveLoop(t *testing.T) {
 			in:      Input{Label: "Name"},
 			input:   "ab\x03",
 			wantErr: ErrCanceled,
-			suffix:  "\r\n",
+			suffix:  "\r\n\x1b[K",
 		},
 		{
 			name:  "backspace",
@@ -100,7 +100,7 @@ func TestLiveLoop(t *testing.T) {
 			in:      Input{Label: "Name"},
 			input:   "abc",
 			wantErr: io.EOF,
-			suffix:  "\r? Name abc\x1b[K",
+			suffix:  "\r? Name abc\x1b[K\x1b[11G",
 		},
 	}
 
@@ -164,12 +164,16 @@ func TestLiveLoopRetry(t *testing.T) {
 		t.Fatalf("value = %q; want %q", got, "abcde")
 	}
 
-	if !strings.Contains(out.String(), "\r\n✗ too short\r\n") {
-		t.Fatalf("output = %q; want the fail line", out.String())
+	if !strings.Contains(out.String(), "\r? Name ab\x1b[K\r\n✗ too short\x1b[K\x1b[1A\x1b[10G") {
+		t.Fatalf("output = %q; want the error row of the block", out.String())
 	}
 
-	if !strings.HasSuffix(out.String(), "\r✓ Name abcde\x1b[K\r\n") {
-		t.Fatalf("output = %q; want the done line", out.String())
+	if strings.Contains(out.String(), "\r\n✗ too short\r\n") {
+		t.Fatalf("output = %q; want no appended error line", out.String())
+	}
+
+	if !strings.HasSuffix(out.String(), "\r✓ Name abcde\x1b[K\r\n\x1b[K") {
+		t.Fatalf("output = %q; want the done line over the erased row", out.String())
 	}
 }
 
@@ -185,7 +189,57 @@ func TestLiveLoopPlaceholder(t *testing.T) {
 		t.Fatalf("value = %q; want empty", got)
 	}
 
-	if !strings.HasPrefix(out.String(), "\r? Name \x1b[2mnxkh4ng\x1b[0m\x1b[K\x1b[7D") {
+	if !strings.HasPrefix(out.String(), "\r? Name \x1b[2mnxkh4ng\x1b[0m\x1b[K\x1b[8G") {
 		t.Fatalf("output = %q; want the placeholder frame", out.String())
+	}
+}
+
+func TestLiveLoopRejectDoesNotGrowTranscript(t *testing.T) {
+	in := Input{
+		Label: "Name",
+		Validate: func(s string) error {
+			if len(s) < 3 {
+				return errors.New("too short")
+			}
+
+			return nil
+		},
+	}
+
+	var out strings.Builder
+
+	got, err := in.liveLoop(strings.NewReader("ab\r\x01ab\r\x01abc\r"), &out)
+	if err != nil {
+		t.Fatalf("err = %v; want nil", err)
+	}
+
+	if got != "abc" {
+		t.Fatalf("value = %q; want abc", got)
+	}
+
+	if n := strings.Count(out.String(), "\r\n✗ too short\x1b[K"); n != 2 {
+		t.Fatalf("error rows = %d; want 2 (one per rejected submit)", n)
+	}
+
+	if strings.Contains(out.String(), "\r\n✗ too short\r\n") {
+		t.Fatalf("output = %q; want no appended error line", out.String())
+	}
+}
+
+func TestLiveLoopRejectThenCancel(t *testing.T) {
+	in := Input{
+		Label:    "Name",
+		Validate: func(string) error { return errors.New("nope") },
+	}
+
+	var out strings.Builder
+
+	_, err := in.liveLoop(strings.NewReader("ab\r\x03"), &out)
+	if !errors.Is(err, ErrCanceled) {
+		t.Fatalf("err = %v; want ErrCanceled", err)
+	}
+
+	if !strings.HasSuffix(out.String(), "\r\n\x1b[K") {
+		t.Fatalf("output = %q; want the error row erased on cancel", out.String())
 	}
 }

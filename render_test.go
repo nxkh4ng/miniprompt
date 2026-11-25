@@ -1,6 +1,10 @@
 package miniprompt
 
-import "testing"
+import (
+	"errors"
+	"strings"
+	"testing"
+)
 
 // lineEditor builds an editor with text and the cursor at pos.
 func lineEditor(text string, pos int) *editor {
@@ -39,35 +43,30 @@ func TestPendingFrame(t *testing.T) {
 		pos    int
 		want   string
 		cursor int
-		width  int
 	}{
 		{
 			name:   "default marker, empty",
 			in:     Input{Label: "Name"},
 			want:   "? Name ",
 			cursor: 7,
-			width:  7,
 		},
 		{
 			name:   "custom marker",
 			in:     Input{Marker: Marker{Pending: "[?]"}, Label: "Name"},
 			want:   "[?] Name ",
 			cursor: 9,
-			width:  9,
 		},
 		{
 			name:   "hidden marker",
 			in:     Input{Marker: Marker{Pending: " "}, Label: "Name"},
 			want:   "Name ",
 			cursor: 5,
-			width:  5,
 		},
 		{
 			name:   "placeholder",
 			in:     Input{Label: "Name", Placeholder: "nxkh4ng"},
 			want:   "? Name " + sgrDim + "nxkh4ng" + sgrReset,
 			cursor: 7,
-			width:  14,
 		},
 		{
 			name:   "text",
@@ -76,7 +75,6 @@ func TestPendingFrame(t *testing.T) {
 			pos:    5,
 			want:   "? Name Alice",
 			cursor: 12,
-			width:  12,
 		},
 		{
 			name:   "cursor in the middle",
@@ -85,7 +83,6 @@ func TestPendingFrame(t *testing.T) {
 			pos:    2,
 			want:   "? Name Alice",
 			cursor: 9,
-			width:  12,
 		},
 		{
 			name:   "placeholder ignored when text present",
@@ -94,7 +91,6 @@ func TestPendingFrame(t *testing.T) {
 			pos:    1,
 			want:   "? Name A",
 			cursor: 8,
-			width:  8,
 		},
 		{
 			name:   "wide text",
@@ -103,7 +99,6 @@ func TestPendingFrame(t *testing.T) {
 			pos:    2,
 			want:   "? Name 日本",
 			cursor: 11,
-			width:  11,
 		},
 		{
 			name:   "wide cursor in the middle",
@@ -112,7 +107,6 @@ func TestPendingFrame(t *testing.T) {
 			pos:    1,
 			want:   "? Name 日本",
 			cursor: 9,
-			width:  11,
 		},
 	}
 
@@ -125,12 +119,6 @@ func TestPendingFrame(t *testing.T) {
 			}
 			if f.cursor != tt.cursor {
 				t.Fatalf("cursor = %d; want %d", f.cursor, tt.cursor)
-			}
-			if f.width != tt.width {
-				t.Fatalf("width = %d; want %d", f.width, tt.width)
-			}
-			if got, want := f.back(), tt.width-tt.cursor; got != want {
-				t.Fatalf("back() = %d; want %d", got, want)
 			}
 		})
 	}
@@ -145,9 +133,6 @@ func TestPendingFrameSelection(t *testing.T) {
 	if want := "? Name " + sgrReverse + "abc" + sgrReset; f.line != want {
 		t.Fatalf("line = %q; want %q", f.line, want)
 	}
-	if f.width != 10 {
-		t.Fatalf("width = %d; want 10", f.width)
-	}
 }
 
 func TestPendingFrameCursorNotSelected(t *testing.T) {
@@ -161,5 +146,88 @@ func TestPendingFrameCursorNotSelected(t *testing.T) {
 	}
 	if f.cursor != 8 {
 		t.Fatalf("cursor = %d; want 8", f.cursor)
+	}
+}
+
+func TestFailLine(t *testing.T) {
+	tests := []struct {
+		name string
+		m    Marker
+		err  error
+		cols int
+		want string
+	}{
+		{"default marker", Marker{}, errors.New("too short"), 40, "✗ too short"},
+		{"hidden marker", Marker{Fail: " "}, errors.New("too short"), 40, "too short"},
+		{"custom marker", Marker{Fail: "[x]"}, errors.New("no"), 40, "[x] no"},
+		{"newline flattened", Marker{}, errors.New("a\nb\r\nc"), 40, "✗ a b  c"},
+		{"cut to width", Marker{}, errors.New("abcdefghij"), 6, "✗ abcd"},
+		{"zero width", Marker{}, errors.New("no"), 0, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Input{Marker: tt.m}.failLine(tt.err, tt.cols)
+
+			if got != tt.want {
+				t.Fatalf("failLine() = %q; want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestWriteFrame(t *testing.T) {
+	tests := []struct {
+		name string
+		f    frame
+		prev int
+		want string
+		rows int
+	}{
+		{
+			name: "one row",
+			f:    frame{line: "? Name a", cursor: 8},
+			want: "\r? Name a\x1b[K\x1b[9G",
+			rows: 1,
+		},
+		{
+			name: "error row",
+			f:    frame{line: "? Name ab", msg: "✗ too short", cursor: 9},
+			prev: 1,
+			want: "\r? Name ab\x1b[K\r\n✗ too short\x1b[K\x1b[1A\x1b[10G",
+			rows: 2,
+		},
+		{
+			name: "clears the error row",
+			f:    frame{line: "? Name abc", cursor: 10},
+			prev: 2,
+			want: "\r? Name abc\x1b[K\r\n\x1b[K\x1b[1A\x1b[11G",
+			rows: 2,
+		},
+		{
+			name: "cursor at column zero",
+			f:    frame{line: "Name ", cursor: 0},
+			want: "\rName \x1b[K\x1b[1G",
+			rows: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var out strings.Builder
+
+			rows, err := writeFrame(&out, tt.f, tt.prev)
+			if err != nil {
+				t.Fatalf("err = %v; want nil", err)
+			}
+
+			if out.String() != tt.want {
+				t.Fatalf("out = %q; want %q", out.String(), tt.want)
+			}
+
+			if rows != tt.rows {
+				t.Fatalf("rows = %d; want %d", rows, tt.rows)
+			}
+		})
 	}
 }
