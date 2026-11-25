@@ -26,19 +26,6 @@ func (f frame) back() int {
 	return f.width - f.cursor
 }
 
-// markerText returns a marker followed by a space.
-// An empty marker uses def; a single space hides the marker.
-func markerText(m, def string) string {
-	switch m {
-	case "":
-		return def + " "
-	case " ":
-		return ""
-	default:
-		return m + " "
-	}
-}
-
 // pendingFrame for Input renders the line while the user is typing.
 //
 // The placeholder is drawn only when the buffer is empty.
@@ -80,5 +67,28 @@ func (in Input) pendingFrame(e *editor) frame {
 		line:   sb.String(),
 		cursor: cursor,
 		width:  prefix + displayWidth(string(e.buf)),
+	}
+}
+
+// doneLine is the final line shown once the value is accepted.
+func (in Input) doneLine(value string) string {
+	return markerText(in.Marker.Done, "✓") + in.Label + " " + value
+}
+
+// failLine is the line shown under the prompt when validation fails.
+func (in Input) failLine(err error) string {
+	return markerText(in.Marker.Fail, "✗") + err.Error()
+}
+
+// markerText returns a marker followed by a space.
+// An empty marker uses def; a single space hides the marker.
+func markerText(m, def string) string {
+	switch m {
+	case "":
+		return def + " "
+	case " ":
+		return ""
+	default:
+		return m + " "
 	}
 }
