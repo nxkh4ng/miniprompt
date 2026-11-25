@@ -51,16 +51,7 @@ func (in Input) runPlainMode(r io.Reader, w io.Writer) (string, error) {
 }
 
 func (in Input) promptText() string {
-	marker := in.Marker.Pending
-
-	switch marker {
-	case "":
-		marker = "?"
-	case " ":
-		return in.Label + " "
-	}
-
-	return marker + " " + in.Label + " "
+	return markerText(in.Marker.Pending, "?") + in.Label + " "
 }
 
 func (in Input) check(value string) error {
