@@ -59,13 +59,12 @@ func (in Input) pendingFrame(e *editor) frame {
 
 // doneLine is the final line shown once the value is accepted.
 func (in Input) doneLine(value string) string {
-	return markerText(in.Marker.Done, "✓") + in.Label + " " + value
+	return doneText(in.Marker, in.Label, value)
 }
 
 // failLine is the line shown under the prompt when validation fails.
 func (in Input) failLine(err error, cols int) string {
-	s := markerText(in.Marker.Fail, "✗") + oneLine(err.Error())
-	return cut(s, cols)
+	return failText(in.Marker, err, cols)
 }
 
 // oneLine replaces control chars with spaces
@@ -91,4 +90,15 @@ func markerText(m, def string) string {
 	default:
 		return m + " "
 	}
+}
+
+// doneText renders the final summary line shared by all widgets.
+func doneText(m Marker, label, value string) string {
+	return markerText(m.Done, "✓") + label + " " + value
+}
+
+// failText renders the error row shared by all widgets.
+func failText(m Marker, err error, cols int) string {
+	s := markerText(m.Fail, "✗") + oneLine(err.Error())
+	return cut(s, cols)
 }

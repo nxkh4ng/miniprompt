@@ -142,3 +142,16 @@ func TestRunReadError(t *testing.T) {
 		t.Fatalf("err = %v; want boom", err)
 	}
 }
+
+func TestFinishBlockShrinksBlock(t *testing.T) {
+	var out strings.Builder
+
+	if err := finishBlock(&out, []string{"done"}, 4); err != nil {
+		t.Fatalf("err = %v; want nil", err)
+	}
+
+	want := "\rdone\x1b[K\r\n\x1b[K\r\n\x1b[K\r\n\x1b[K\x1b[2A"
+	if out.String() != want {
+		t.Fatalf("out = %q; want %q", out.String(), want)
+	}
+}

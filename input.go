@@ -6,8 +6,6 @@ import (
 	"io"
 	"os"
 	"strings"
-
-	"golang.org/x/term"
 )
 
 var ErrCanceled = errors.New("miniprompt: canceled")
@@ -97,11 +95,9 @@ func (in Input) Run() (string, error) {
 // It uses live mode when both are terminals,
 // plain mode otherwise.
 func (in Input) RunWith(r io.Reader, w io.Writer) (string, error) {
-	rf, rok := r.(*os.File)
-	wf, wok := w.(*os.File)
-
-	if rok && wok && term.IsTerminal(int(rf.Fd())) && term.IsTerminal(int(wf.Fd())) {
-		return liveSession(rf, wf, newInputWidget(in))
+	rf, wf, ok := terminalFiles(r, w)
+	if ok {
+		return liveSession(rf, wf, widget[string](newInputWidget(in)))
 	}
 
 	return in.runPlainMode(r, w)

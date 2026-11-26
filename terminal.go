@@ -131,11 +131,17 @@ func finishBlock(w io.Writer, lines []string, prev int) error {
 		sb.WriteString("\x1b[K")
 	}
 
-	for i := len(lines); i < prev; i++ {
-		sb.WriteString("\r\n\x1b[K")
-	}
+	if prev > len(lines) {
+		for i := len(lines); i < prev; i++ {
+			sb.WriteString("\r\n\x1b[K")
+		}
 
-	if prev <= len(lines) {
+		if up := prev - len(lines) - 1; up > 0 {
+			sb.WriteString("\x1b[")
+			sb.WriteString(strconv.Itoa(up))
+			sb.WriteString("A")
+		}
+	} else {
 		sb.WriteString("\r\n")
 	}
 
@@ -154,4 +160,19 @@ func clearBlock(w io.Writer, f frame, rows int) error {
 
 	_, err := io.WriteString(w, sb.String())
 	return err
+}
+
+// terminalFiles reports whether r and w are both terminals.
+func terminalFiles(r io.Reader, w io.Writer) (*os.File, *os.File, bool) {
+	rf, rok := r.(*os.File)
+	wf, wok := w.(*os.File)
+	if !rok || !wok {
+		return nil, nil, false
+	}
+
+	if !term.IsTerminal(int(rf.Fd())) || !term.IsTerminal(int(wf.Fd())) {
+		return nil, nil, false
+	}
+
+	return rf, wf, true
 }
