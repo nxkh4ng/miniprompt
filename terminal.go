@@ -202,8 +202,10 @@ func applyEvent(ev event, e *editor) liveResult {
 		e.home()
 	case evEnd:
 		e.end()
-	case evKillWord:
-		e.killWord()
+	case evKillWordLeft:
+		e.killWordLeft()
+	case evKillWordRight:
+		e.killWordRight()
 	case evSelectAll:
 		e.selectAll()
 	case evEnter:

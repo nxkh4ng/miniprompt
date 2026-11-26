@@ -142,8 +142,8 @@ func (e *editor) wordRight() {
 	e.setCursor(e.wordEnd(e.cursor))
 }
 
-// killWord removes the selection, or the word before the cursor.
-func (e *editor) killWord() {
+// killWordLeft removes the selection, or the word before the cursor.
+func (e *editor) killWordLeft() {
 	if e.deleteSelection() {
 		return
 	}
@@ -151,6 +151,16 @@ func (e *editor) killWord() {
 	start := e.wordStart(e.cursor)
 	e.buf = slices.Delete(e.buf, start, e.cursor)
 	e.setCursor(start)
+}
+
+// killWordRight removes the selection, or the word after the cursor.
+func (e *editor) killWordRight() {
+	if e.deleteSelection() {
+		return
+	}
+
+	end := e.wordEnd(e.cursor)
+	e.buf = slices.Delete(e.buf, e.cursor, end)
 }
 
 // selectAll selects the whole line.

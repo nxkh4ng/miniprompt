@@ -21,16 +21,16 @@ func TestDecodeKeys(t *testing.T) {
 		{"backspace-ctrl-h", "\x08", []eventKind{evBackspace}},
 		{"interrupt", "\x03", []eventKind{evInterrupt}},
 		{"ctrl-a-select", "\x01", []eventKind{evSelectAll}},
-		{"ctrl-w-kill-word", "\x17", []eventKind{evKillWord}},
+		{"ctrl-w-kill-word", "\x17", []eventKind{evKillWordLeft}},
 		{"ctrl-d-ignored", "\x04", []eventKind{evUnknown}},
-		{"tab-ignored", "\t", []eventKind{evUnknown}},
+		{"tab", "\t", []eventKind{evTab}},
 		{"nul-ignored", "\x00", []eventKind{evUnknown}},
 		{"esc-alone-pending", "\x1b", nil},
 		{"alt-key-drops-esc", "\x1ba", []eventKind{evUnknown, evRune}},
 		{"left", "\x1b[D", []eventKind{evLeft}},
 		{"right", "\x1b[C", []eventKind{evRight}},
-		{"up-ignored", "\x1b[A", []eventKind{evUnknown}},
-		{"down-ignored", "\x1b[B", []eventKind{evUnknown}},
+		{"up", "\x1b[A", []eventKind{evUp}},
+		{"down", "\x1b[B", []eventKind{evDown}},
 		{"home", "\x1b[H", []eventKind{evHome}},
 		{"end", "\x1b[F", []eventKind{evEnd}},
 		{"home-1", "\x1b[1~", []eventKind{evHome}},
@@ -42,9 +42,11 @@ func TestDecodeKeys(t *testing.T) {
 		{"ctrl-right", "\x1b[1;5C", []eventKind{evWordRight}},
 		{"ctrl-left-short", "\x1b[5D", []eventKind{evWordLeft}},
 		{"ctrl-right-short", "\x1b[5C", []eventKind{evWordRight}},
+		{"ctrl-del-kill-word-right", "\x1b[3;5~", []eventKind{evKillWordRight}},
 		{"ss3-left", "\x1bOD", []eventKind{evLeft}},
 		{"ss3-home", "\x1bOH", []eventKind{evHome}},
-		{"ss3-up-ignored", "\x1bOA", []eventKind{evUnknown}},
+		{"ss3-up", "\x1bOA", []eventKind{evUp}},
+		{"ss3-down", "\x1bOB", []eventKind{evDown}},
 		{"unknown-csi", "\x1b[Z", []eventKind{evUnknown}},
 		{"unknown-ss3", "\x1bOP", []eventKind{evUnknown}},
 		{"utf8", "Việt", []eventKind{evRune, evRune, evRune, evRune}},
@@ -54,6 +56,7 @@ func TestDecodeKeys(t *testing.T) {
 		{"truncated-rune-pending", "\xe1\xbb", nil},
 		{"paste", pasteStart + "hi" + pasteEnd, []eventKind{evPaste}},
 		{"paste-then-rune", pasteStart + "hi" + pasteEnd + "x", []eventKind{evPaste, evRune}},
+		{"rune-tab-rune", "a\tb", []eventKind{evRune, evTab, evRune}},
 	}
 
 	for _, tt := range tests {
@@ -81,6 +84,9 @@ func TestDecodeKeysChunked(t *testing.T) {
 		"Việt 🙂",
 		"\x1ba",
 		"\xff\xfe",
+		"\x1b[A\x1b[B",
+		"\x1bOB\x1bOA",
+		"\x1b[3;5~",
 	}
 
 	for _, in := range inputs {

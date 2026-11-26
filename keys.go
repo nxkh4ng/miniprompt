@@ -15,19 +15,23 @@ const (
 	evUnknown eventKind = iota
 	evRune
 	evEnter
+	evTab
 	evBackspace
 	evDelete
 	evLeft
 	evRight
+	evUp
+	evDown
 	evWordLeft  // Ctrl+left
 	evWordRight // Ctrl+right
 	evHome
 	evEnd
-	evKillWord   // Ctrl+w
-	evSelectAll  // Ctrl+a
-	evInterrupt  // Ctrl+c
-	evPaste      // Bracketed paste
-	evPasteStart // Internal: switches the decoder into paste mode
+	evKillWordLeft  // Ctrl+w
+	evKillWordRight // Ctrl+del
+	evSelectAll     // Ctrl+a
+	evInterrupt     // Ctrl+c
+	evPaste         // Bracketed paste
+	evPasteStart    // Internal: switches the decoder into paste mode
 )
 
 // event is a decoded input event.
@@ -52,8 +56,8 @@ var escapeSeqs = [...]struct {
 	kind eventKind
 }{
 	// CSI sequences
-	{"\x1b[A", evUnknown},
-	{"\x1b[B", evUnknown},
+	{"\x1b[A", evUp},
+	{"\x1b[B", evDown},
 	{"\x1b[C", evRight},
 	{"\x1b[D", evLeft},
 	{"\x1b[H", evHome},
@@ -63,14 +67,15 @@ var escapeSeqs = [...]struct {
 	{"\x1b[7~", evHome},
 	{"\x1b[8~", evEnd},
 	{"\x1b[3~", evDelete},
+	{"\x1b[3;5~", evKillWordRight},
 	{"\x1b[1;5C", evWordRight},
 	{"\x1b[1;5D", evWordLeft},
 	{"\x1b[5C", evWordRight},
 	{"\x1b[5D", evWordLeft},
 
 	// SS3 sequences, used by terminal in application cursor mode
-	{"\x1bOA", evUnknown},
-	{"\x1bOB", evUnknown},
+	{"\x1bOA", evUp},
+	{"\x1bOB", evDown},
 	{"\x1bOC", evRight},
 	{"\x1bOD", evLeft},
 	{"\x1bOH", evHome},
@@ -84,6 +89,7 @@ const (
 	byteCtrlD = 0x04
 	byteCtrlH = 0x08
 	byteCtrlW = 0x17
+	byteTab   = 0x09
 	byteEsc   = 0x1b
 	byteDel   = 0x7f
 	byteSpace = 0x20
@@ -188,6 +194,8 @@ func decodeOne(b []byte) (event, int, bool) {
 	switch b[0] {
 	case '\r', '\n':
 		return event{kind: evEnter}, 1, false
+	case byteTab:
+		return event{kind: evTab}, 1, false
 	case byteCtrlH, byteDel:
 		return event{kind: evBackspace}, 1, false
 
@@ -197,7 +205,7 @@ func decodeOne(b []byte) (event, int, bool) {
 	case byteCtrlA:
 		return event{kind: evSelectAll}, 1, false
 	case byteCtrlW:
-		return event{kind: evKillWord}, 1, false
+		return event{kind: evKillWordLeft}, 1, false
 
 	// Ctrl+d is ignored; only Ctrl+c cancels
 	case byteCtrlD:

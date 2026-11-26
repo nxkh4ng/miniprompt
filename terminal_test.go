@@ -102,6 +102,12 @@ func TestLiveLoop(t *testing.T) {
 			wantErr: io.EOF,
 			suffix:  "\r? Name abc\x1b[K\x1b[11G",
 		},
+		{
+			name:  "kill word right",
+			in:    Input{Label: "Name"},
+			input: "ab\x1b[D\x1b[3;5~\r",
+			want:  "a",
+		},
 	}
 
 	for _, tt := range tests {

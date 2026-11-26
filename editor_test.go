@@ -119,14 +119,14 @@ func TestEditorEdits(t *testing.T) {
 		{
 			name:  "kill word",
 			start: "foo bar",
-			ops:   []func(*editor){(*editor).killWord},
+			ops:   []func(*editor){(*editor).killWordLeft},
 			want:  "foo ",
 			at:    4,
 		},
 		{
 			name:  "kill word skips punctuation",
 			start: "foo/bar",
-			ops:   []func(*editor){(*editor).killWord},
+			ops:   []func(*editor){(*editor).killWordLeft},
 			want:  "foo/",
 			at:    4,
 		},
@@ -154,7 +154,7 @@ func TestEditorEdits(t *testing.T) {
 		{
 			name:  "select all then kill word clears",
 			start: "abc def",
-			ops:   []func(*editor){(*editor).selectAll, (*editor).killWord},
+			ops:   []func(*editor){(*editor).selectAll, (*editor).killWordLeft},
 			want:  "",
 			at:    0,
 		},
@@ -198,6 +198,40 @@ func TestEditorEdits(t *testing.T) {
 			ops:   []func(*editor){(*editor).backspace},
 			want:  "a",
 			at:    1,
+		},
+		{
+			name:  "kill word right",
+			start: "foo bar",
+			ops:   []func(*editor){(*editor).home, (*editor).killWordRight},
+			want:  " bar",
+			at:    0,
+		},
+		{
+			name:  "kill word right from middle",
+			start: "foo bar",
+			ops: []func(*editor){
+				(*editor).home,
+				(*editor).right,
+				(*editor).right,
+				(*editor).right,
+				(*editor).right,
+				(*editor).killWordRight,
+			},
+			want: "foo ",
+			at:   4,
+		},
+		{
+			name:  "kill word right skips punctuation",
+			start: "foo/bar",
+			ops: []func(*editor){
+				(*editor).home,
+				(*editor).right,
+				(*editor).right,
+				(*editor).right,
+				(*editor).killWordRight,
+			},
+			want: "foo",
+			at:   3,
 		},
 	}
 
@@ -257,7 +291,8 @@ func TestEditorAlwaysDropsSelection(t *testing.T) {
 		{"end", (*editor).end},
 		{"word left", (*editor).wordLeft},
 		{"word right", (*editor).wordRight},
-		{"kill word", (*editor).killWord},
+		{"kill word left", (*editor).killWordLeft},
+		{"kill word right", (*editor).killWordRight},
 	}
 
 	for _, op := range ops {
@@ -291,7 +326,7 @@ func FuzzEditorOps(f *testing.F) {
 		for range steps {
 			s = s*1664525 + 1013904223
 
-			switch s % 13 {
+			switch s % 14 {
 			case 0:
 				e.insertRune('a' + rune(s%26))
 			case 1:
@@ -313,11 +348,13 @@ func FuzzEditorOps(f *testing.F) {
 			case 9:
 				e.wordRight()
 			case 10:
-				e.killWord()
+				e.killWordLeft()
 			case 11:
 				e.selectAll()
 			case 12:
 				e.insertRune('ệ')
+			case 13:
+				e.killWordRight()
 			}
 
 			if e.cursor < 0 || e.cursor > len(e.buf) {
