@@ -235,3 +235,42 @@ func applyEvent(ev event, e *editor) liveResult {
 
 	return liveRedraw
 }
+
+// finishBlock overwrites the prompt block with the final lines
+// and leaves the cursor on the line below.
+func finishBlock(w io.Writer, lines []string, prev int) error {
+	var sb strings.Builder
+	sb.WriteString("\r")
+
+	for i, line := range lines {
+		if i > 0 {
+			sb.WriteString("\r\n")
+		}
+		sb.WriteString(line)
+		sb.WriteString("\x1b[K")
+	}
+
+	for i := len(lines); i < prev; i++ {
+		sb.WriteString("\r\n\x1b[K")
+	}
+
+	if prev <= len(lines) {
+		sb.WriteString("\r\n")
+	}
+
+	_, err := io.WriteString(w, sb.String())
+	return err
+}
+
+// clearBlock moves below the block and clears that line.
+// The block itself is left visible, matching the current cancel behavior.
+func clearBlock(w io.Writer, f frame, rows int) error {
+	var sb strings.Builder
+	for i := f.row; i < rows; i++ {
+		sb.WriteString("\r\n")
+	}
+	sb.WriteString("\x1b[K")
+
+	_, err := io.WriteString(w, sb.String())
+	return err
+}
