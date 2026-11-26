@@ -25,6 +25,70 @@ type Marker struct {
 	Fail    string
 }
 
+// inputWidget adapts Input to the prompt driver.
+type inputWidget struct {
+	in Input
+	ed editor
+}
+
+func newInputWidget(in Input) *inputWidget {
+	return &inputWidget{in: in}
+}
+
+func (w *inputWidget) view(int) frame {
+	return w.in.pendingFrame(&w.ed)
+}
+
+func (w *inputWidget) handle(ev event) action {
+	switch ev.kind {
+	case evRune:
+		w.ed.insertRune(ev.r)
+	case evPaste:
+		w.ed.insertText(ev.text)
+	case evBackspace:
+		w.ed.backspace()
+	case evDelete:
+		w.ed.deleteForward()
+	case evLeft:
+		w.ed.left()
+	case evRight:
+		w.ed.right()
+	case evWordLeft:
+		w.ed.wordLeft()
+	case evWordRight:
+		w.ed.wordRight()
+	case evHome:
+		w.ed.home()
+	case evEnd:
+		w.ed.end()
+	case evKillWordLeft:
+		w.ed.killWordLeft()
+	case evKillWordRight:
+		w.ed.killWordRight()
+	case evSelectAll:
+		w.ed.selectAll()
+	case evEnter:
+		return actSubmit
+	case evInterrupt:
+		return actCancel
+	}
+
+	return actRedraw
+}
+
+func (w *inputWidget) submit() (string, error) {
+	v := w.ed.text()
+	return v, w.in.check(v)
+}
+
+func (w *inputWidget) fail(err error, cols int) string {
+	return w.in.failLine(err, cols)
+}
+
+func (w *inputWidget) final(v string) []string {
+	return []string{w.in.doneLine(v)}
+}
+
 func (in Input) Run() (string, error) {
 	return in.RunWith(os.Stdin, os.Stdout)
 }
@@ -37,7 +101,7 @@ func (in Input) RunWith(r io.Reader, w io.Writer) (string, error) {
 	wf, wok := w.(*os.File)
 
 	if rok && wok && term.IsTerminal(int(rf.Fd())) && term.IsTerminal(int(wf.Fd())) {
-		return in.runLive(rf, wf)
+		return liveSession(rf, wf, newInputWidget(in))
 	}
 
 	return in.runPlainMode(r, w)

@@ -1,8 +1,6 @@
 package miniprompt
 
 import (
-	"errors"
-	"fmt"
 	"io"
 	"os"
 	"strconv"
@@ -11,25 +9,17 @@ import (
 	"golang.org/x/term"
 )
 
-// defaultCols is the width assumed when
-// the output is not a terminal.
+// defaultCols is the width assumed when the output is not a terminal.
 const defaultCols = 80
 
-// liveResult is what 1 key asks the live loop
-// to do next.
-type liveResult uint8
+// liveSession runs wd on a terminal in raw mode.
+// It restores the terminal on every exit path.
+func liveSession[T any](r, w *os.File, wd widget[T]) (T, error) {
+	var zero T
 
-const (
-	liveRedraw liveResult = iota
-	liveSubmit
-	liveCancel
-)
-
-// runLive prompts on a terminal using raw mode.
-func (in Input) runLive(r, w *os.File) (string, error) {
 	state, err := term.MakeRaw(int(r.Fd()))
 	if err != nil {
-		return "", err
+		return zero, err
 	}
 
 	// Raw mode also disables output processing on the same TTY,
@@ -40,95 +30,24 @@ func (in Input) runLive(r, w *os.File) (string, error) {
 
 	restoreVT, err := enableVT(w)
 	if err != nil {
-		return "", err
+		return zero, err
 	}
 	defer restoreVT()
 
 	// Bracketed paste keeps pasted newlines from submitting the prompt
 	if _, werr := io.WriteString(w, "\x1b[?2004h"); werr != nil {
-		return "", werr
+		return zero, werr
 	}
 	defer func() {
 		_, _ = io.WriteString(w, "\x1b[?2004l")
 	}()
 
-	return in.liveLoop(r, w)
+	return run(wd, r, w)
 }
 
-// liveLoop reads keys and redraws the prompt until the user submits.
-// It only needs io.Reader and io.Writer, so it is testable without a TTY.
+// liveLoop is the live path without raw-mode setup, for tests.
 func (in Input) liveLoop(r io.Reader, w io.Writer) (string, error) {
-	e := &editor{}
-	dec := &keyDecoder{}
-	buf := make([]byte, 256)
-	cols := size(w)
-
-	rows, err := in.draw(w, e, "", 0)
-	if err != nil {
-		return "", err
-	}
-
-	for {
-		n, readErr := r.Read(buf)
-		for _, ev := range dec.decode(buf[:n]) {
-			switch applyEvent(ev, e) {
-			case liveCancel:
-				if _, werr := io.WriteString(w, "\r\n\x1b[K"); werr != nil {
-					return "", werr
-				}
-				return "", ErrCanceled
-
-			case liveSubmit:
-				value := e.text()
-
-				if verr := in.check(value); verr != nil {
-					// Leave the last cell free so the message
-					// cannot trigger a deferred wrap
-					msg := in.failLine(verr, cols-1)
-
-					if rows, err = in.draw(w, e, msg, rows); err != nil {
-						return "", err
-					}
-					continue
-				}
-
-				return value, in.finish(w, value, rows)
-			}
-
-			if rows, err = in.draw(w, e, "", rows); err != nil {
-				return "", err
-			}
-		}
-
-		if readErr != nil {
-			if errors.Is(readErr, io.EOF) {
-				return "", fmt.Errorf("miniprompt: read input: %w", readErr)
-			}
-
-			return "", readErr
-		}
-	}
-}
-
-// draw repaints the prompt block and reports how many rows it uses.
-// footer is drawn on the last row; "" clears that row.
-func (in Input) draw(w io.Writer, e *editor, footer string, prev int) (int, error) {
-	f := in.pendingFrame(e)
-	f.footer = footer
-
-	return writeFrame(w, f, prev)
-}
-
-// finish replaces the block with the accepted line and moves below it,
-// erasing the row the error used.
-func (in Input) finish(w io.Writer, value string, rows int) error {
-	s := "\r" + in.doneLine(value) + "\x1b[K\r\n"
-	if rows > 1 {
-		s += "\x1b[K"
-	}
-
-	_, err := io.WriteString(w, s)
-	return err
+	return run(newInputWidget(in), r, w)
 }
 
 // size reports the output width for the live prompt.
@@ -196,44 +115,6 @@ func writeFrame(w io.Writer, f frame, prev int) (int, error) {
 
 	_, err := io.WriteString(w, sb.String())
 	return total, err
-}
-
-// applyEvent applies one decoded key to the editor.
-func applyEvent(ev event, e *editor) liveResult {
-	switch ev.kind {
-	case evRune:
-		e.insertRune(ev.r)
-	case evPaste:
-		e.insertText(ev.text)
-	case evBackspace:
-		e.backspace()
-	case evDelete:
-		e.deleteForward()
-	case evLeft:
-		e.left()
-	case evRight:
-		e.right()
-	case evWordLeft:
-		e.wordLeft()
-	case evWordRight:
-		e.wordRight()
-	case evHome:
-		e.home()
-	case evEnd:
-		e.end()
-	case evKillWordLeft:
-		e.killWordLeft()
-	case evKillWordRight:
-		e.killWordRight()
-	case evSelectAll:
-		e.selectAll()
-	case evEnter:
-		return liveSubmit
-	case evInterrupt:
-		return liveCancel
-	}
-
-	return liveRedraw
 }
 
 // finishBlock overwrites the prompt block with the final lines
