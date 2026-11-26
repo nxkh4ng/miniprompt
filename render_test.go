@@ -114,11 +114,11 @@ func TestPendingFrame(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := tt.in.pendingFrame(lineEditor(tt.text, tt.pos))
 
-			if f.line != tt.want {
-				t.Fatalf("line = %q; want %q", f.line, tt.want)
+			if f.lines[0] != tt.want {
+				t.Fatalf("line = %q; want %q", f.lines[0], tt.want)
 			}
-			if f.cursor != tt.cursor {
-				t.Fatalf("cursor = %d; want %d", f.cursor, tt.cursor)
+			if f.col != tt.cursor {
+				t.Fatalf("cursor = %d; want %d", f.col, tt.cursor)
 			}
 		})
 	}
@@ -130,8 +130,8 @@ func TestPendingFrameSelection(t *testing.T) {
 
 	f := Input{Label: "Name"}.pendingFrame(e)
 
-	if want := "? Name " + sgrReverse + "abc" + sgrReset; f.line != want {
-		t.Fatalf("line = %q; want %q", f.line, want)
+	if want := "? Name " + sgrReverse + "abc" + sgrReset; f.lines[0] != want {
+		t.Fatalf("line = %q; want %q", f.lines[0], want)
 	}
 }
 
@@ -141,11 +141,11 @@ func TestPendingFrameCursorNotSelected(t *testing.T) {
 
 	f := Input{Label: "Name"}.pendingFrame(e)
 
-	if want := "? Name a" + sgrReverse + "bc" + sgrReset; f.line != want {
-		t.Fatalf("line = %q; want %q", f.line, want)
+	if want := "? Name a" + sgrReverse + "bc" + sgrReset; f.lines[0] != want {
+		t.Fatalf("line = %q; want %q", f.lines[0], want)
 	}
-	if f.cursor != 8 {
-		t.Fatalf("cursor = %d; want 8", f.cursor)
+	if f.col != 8 {
+		t.Fatalf("cursor = %d; want 8", f.col)
 	}
 }
 
@@ -186,29 +186,46 @@ func TestWriteFrame(t *testing.T) {
 	}{
 		{
 			name: "one row",
-			f:    frame{line: "? Name a", cursor: 8},
+			f:    frame{lines: []string{"? Name a"}, col: 8},
 			want: "\r? Name a\x1b[K\x1b[9G",
 			rows: 1,
 		},
 		{
 			name: "error row",
-			f:    frame{line: "? Name ab", msg: "✗ too short", cursor: 9},
+			f:    frame{lines: []string{"? Name ab"}, footer: "✗ too short", col: 9},
 			prev: 1,
 			want: "\r? Name ab\x1b[K\r\n✗ too short\x1b[K\x1b[1A\x1b[10G",
 			rows: 2,
 		},
 		{
 			name: "clears the error row",
-			f:    frame{line: "? Name abc", cursor: 10},
+			f:    frame{lines: []string{"? Name abc"}, col: 10},
 			prev: 2,
 			want: "\r? Name abc\x1b[K\r\n\x1b[K\x1b[1A\x1b[11G",
 			rows: 2,
 		},
 		{
 			name: "cursor at column zero",
-			f:    frame{line: "Name ", cursor: 0},
+			f:    frame{lines: []string{"Name "}, col: 0},
 			want: "\rName \x1b[K\x1b[1G",
 			rows: 1,
+		},
+		{
+			name: "three lines",
+			f: frame{
+				lines: []string{"one", "two", "three"},
+				row:   1,
+				col:   2,
+			},
+			want: "\rone\x1b[K\r\ntwo\x1b[K\r\nthree\x1b[K\x1b[1A\x1b[3G",
+			rows: 3,
+		},
+		{
+			name: "shrinks to one line",
+			f:    frame{lines: []string{"done"}, col: 4},
+			prev: 3,
+			want: "\rdone\x1b[K\r\n\x1b[K\r\n\x1b[K\x1b[2A\x1b[5G",
+			rows: 3,
 		},
 	}
 

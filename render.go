@@ -11,13 +11,14 @@ const (
 
 // frame is one rendered prompt block.
 //
-// line may contain ANSI styling;
-// msg, when not empty, is drawn on a second row and must be plain text.
-// cursor is the cursor cell on line, counted in terminal cells.
+// lines may contain ANSI styling.
+// row is the line holding the cursor; col is the cursor cell.
+// footer, when not empty, is drawn on the last row and must be plain text.
 type frame struct {
-	line   string
-	msg    string
-	cursor int
+	lines  []string
+	row    int
+	col    int
+	footer string
 }
 
 // pendingFrame for Input renders the line while the user is typing.
@@ -39,10 +40,7 @@ func (in Input) pendingFrame(e *editor) frame {
 		sb.WriteString(in.Placeholder)
 		sb.WriteString(sgrReset)
 
-		return frame{
-			line:   sb.String(),
-			cursor: cursor,
-		}
+		return frame{lines: []string{sb.String()}, col: cursor}
 	}
 
 	start, end, ok := e.selection()
@@ -56,10 +54,7 @@ func (in Input) pendingFrame(e *editor) frame {
 		sb.WriteString(string(e.buf))
 	}
 
-	return frame{
-		line:   sb.String(),
-		cursor: cursor,
-	}
+	return frame{lines: []string{sb.String()}, col: cursor}
 }
 
 // doneLine is the final line shown once the value is accepted.

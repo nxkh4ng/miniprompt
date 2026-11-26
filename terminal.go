@@ -111,10 +111,10 @@ func (in Input) liveLoop(r io.Reader, w io.Writer) (string, error) {
 }
 
 // draw repaints the prompt block and reports how many rows it uses.
-// msg is drawn on a second row; "" clears that row.
-func (in Input) draw(w io.Writer, e *editor, msg string, prev int) (int, error) {
+// footer is drawn on the last row; "" clears that row.
+func (in Input) draw(w io.Writer, e *editor, footer string, prev int) (int, error) {
 	f := in.pendingFrame(e)
-	f.msg = msg
+	f.footer = footer
 
 	return writeFrame(w, f, prev)
 }
@@ -152,31 +152,50 @@ func size(w io.Writer) int {
 // The cursor is placed with CHA so the result does not depend on
 // the column the previous row left behind.
 func writeFrame(w io.Writer, f frame, prev int) (int, error) {
-	rows := 1
-	if f.msg != "" {
-		rows = 2
+	rows := len(f.lines)
+	if f.footer != "" {
+		rows++
 	}
-	rows = max(rows, prev)
+	if rows == 0 {
+		rows = 1
+	}
+	total := max(rows, prev)
 
 	var sb strings.Builder
-
 	sb.WriteString("\r")
-	sb.WriteString(f.line)
-	sb.WriteString("\x1b[K")
 
-	if rows > 1 {
-		sb.WriteString("\r\n")
-		sb.WriteString(f.msg)
+	for i := 0; i < rows; i++ {
+		if i > 0 {
+			sb.WriteString("\r\n")
+		}
+
+		if i < len(f.lines) {
+			sb.WriteString(f.lines[i])
+		} else {
+			sb.WriteString(f.footer)
+		}
 		sb.WriteString("\x1b[K")
-		sb.WriteString("\x1b[1A")
 	}
 
+	// Clear rows left over from a taller previous frame
+	for i := rows; i < total; i++ {
+		sb.WriteString("\r\n\x1b[K")
+	}
+
+	// Cursor is on the last row; move it up to f.row
+	if up := total - 1 - f.row; up > 0 {
+		sb.WriteString("\x1b[")
+		sb.WriteString(strconv.Itoa(up))
+		sb.WriteString("A")
+	}
+
+	// CHA is absolute, so it does not depend on the previous row
 	sb.WriteString("\x1b[")
-	sb.WriteString(strconv.Itoa(f.cursor + 1))
+	sb.WriteString(strconv.Itoa(f.col + 1))
 	sb.WriteString("G")
 
 	_, err := io.WriteString(w, sb.String())
-	return rows, err
+	return total, err
 }
 
 // applyEvent applies one decoded key to the editor.
