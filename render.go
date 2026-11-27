@@ -9,22 +9,47 @@ const (
 	sgrDim     = "\x1b[2m"
 )
 
-// frame is one rendered prompt block.
+// Marker customises the three glyphs a prompt shows.
 //
-// lines may contain ANSI styling.
-// row is the line holding the cursor; col is the cursor cell.
-// footer, when not empty, is drawn on the last row and must be plain text.
-type frame struct {
-	lines  []string
-	row    int
-	col    int
-	footer string
+// The zero value draws "?" while waiting, "✓" on submit, and "✗" on a
+// validation error. A single space (" ") hides that marker; any other value
+// is shown followed by one space.
+type Marker struct {
+	Pending string
+	Done    string
+	Fail    string
 }
 
-// pendingFrame for Input renders the line while the user is typing.
+// frame is one rendered prompt block.
+//
+// lines holds one entry per row and may contain ANSI styling. cursorRow and
+// cursorCol are 0-based: cursorRow indexes lines, cursorCol is a cell in that
+// row. footer, when not empty, is drawn on a row below lines and must be plain
+// text.
+type frame struct {
+	lines     []string
+	cursorRow int
+	cursorCol int
+	footer    string
+}
+
+// rows reports how many screen rows the frame occupies, at least one.
+func (f frame) rows() int {
+	n := len(f.lines)
+	if f.footer != "" {
+		n++
+	}
+
+	return max(n, 1)
+}
+
+// pendingFrame renders the line while the user is typing.
 //
 // The placeholder is drawn only when the buffer is empty.
 // The selection is drawn in reverse video.
+//
+// Input currently draws a single, unbounded line; clipping it to cols is the
+// job of a future viewport.
 func (in Input) pendingFrame(e *editor) frame {
 	var sb strings.Builder
 
@@ -40,7 +65,7 @@ func (in Input) pendingFrame(e *editor) frame {
 		sb.WriteString(in.Placeholder)
 		sb.WriteString(sgrReset)
 
-		return frame{lines: []string{sb.String()}, col: cursor}
+		return frame{lines: []string{sb.String()}, cursorCol: cursor}
 	}
 
 	start, end, ok := e.selection()
@@ -54,7 +79,7 @@ func (in Input) pendingFrame(e *editor) frame {
 		sb.WriteString(string(e.buf))
 	}
 
-	return frame{lines: []string{sb.String()}, col: cursor}
+	return frame{lines: []string{sb.String()}, cursorCol: cursor}
 }
 
 // doneLine is the final line shown once the value is accepted.

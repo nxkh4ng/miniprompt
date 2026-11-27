@@ -23,6 +23,11 @@ func (r *byteReader) Read(p []byte) (int, error) {
 	return 1, nil
 }
 
+// liveLoop runs the live path without raw-mode setup, for tests.
+func (in Input) liveLoop(r io.Reader, w io.Writer) (string, error) {
+	return run[string](newInputWidget(in), r, w)
+}
+
 func TestLiveLoop(t *testing.T) {
 	tests := []struct {
 		name    string

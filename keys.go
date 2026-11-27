@@ -2,6 +2,11 @@ package miniprompt
 
 // This file decodes raw terminal bytes into semantic events.
 // It performs no I/O and knows nothing about rendering.
+//
+// One Read may end in the middle of a UTF-8 rune or an escape sequence, so
+// the decoder keeps unfinished bytes in pending and retries them after the
+// next chunk. A sequence is complete when it reaches a "final byte"
+// (0x40-0x7e); until then it is reported as incomplete.
 
 import (
 	"bytes"
@@ -31,7 +36,6 @@ const (
 	evSelectAll     // Ctrl+a
 	evInterrupt     // Ctrl+c
 	evPaste         // Bracketed paste
-	evPasteStart    // Internal: switches the decoder into paste mode
 )
 
 // event is a decoded input event.
@@ -42,47 +46,49 @@ type event struct {
 	text string
 }
 
-// Bracketed paste markers.
-// The terminal wraps pasted text between these 2 sequences.
+// Bracketed paste markers. The terminal wraps pasted text between them.
 const (
 	pasteStart = "\x1b[200~"
 	pasteEnd   = "\x1b[201~"
 )
 
-// escapeSeqs maps common ANSI sequences to events.
-// Unknown CSI or SS3 sequences are consumed as evUnknown.
-var escapeSeqs = [...]struct {
-	seq  string
-	kind eventKind
-}{
-	// CSI sequences
-	{"\x1b[A", evUp},
-	{"\x1b[B", evDown},
-	{"\x1b[C", evRight},
-	{"\x1b[D", evLeft},
-	{"\x1b[H", evHome},
-	{"\x1b[F", evEnd},
-	{"\x1b[1~", evHome},
-	{"\x1b[4~", evEnd},
-	{"\x1b[7~", evHome},
-	{"\x1b[8~", evEnd},
-	{"\x1b[3~", evDelete},
-	{"\x1b[3;5~", evKillWordRight},
-	{"\x1b[1;5C", evWordRight},
-	{"\x1b[1;5D", evWordLeft},
-	{"\x1b[5C", evWordRight},
-	{"\x1b[5D", evWordLeft},
+var (
+	pasteStartBytes = []byte(pasteStart)
+	pasteEndBytes   = []byte(pasteEnd)
+)
 
-	// SS3 sequences, used by terminal in application cursor mode
-	{"\x1bOA", evUp},
-	{"\x1bOB", evDown},
-	{"\x1bOC", evRight},
-	{"\x1bOD", evLeft},
-	{"\x1bOH", evHome},
-	{"\x1bOF", evEnd},
+// escapeSeqs maps known ANSI sequences to events.
+// Unknown CSI and SS3 sequences are consumed as evUnknown so their bytes do
+// not become text.
+var escapeSeqs = map[string]eventKind{
+	// CSI sequences
+	"\x1b[A":    evUp,
+	"\x1b[B":    evDown,
+	"\x1b[C":    evRight,
+	"\x1b[D":    evLeft,
+	"\x1b[H":    evHome,
+	"\x1b[F":    evEnd,
+	"\x1b[1~":   evHome,
+	"\x1b[4~":   evEnd,
+	"\x1b[7~":   evHome,
+	"\x1b[8~":   evEnd,
+	"\x1b[3~":   evDelete,
+	"\x1b[3;5~": evKillWordRight,
+	"\x1b[1;5C": evWordRight,
+	"\x1b[1;5D": evWordLeft,
+	"\x1b[5C":   evWordRight,
+	"\x1b[5D":   evWordLeft,
+
+	// SS3 sequences, used by terminals in application cursor mode
+	"\x1bOA": evUp,
+	"\x1bOB": evDown,
+	"\x1bOC": evRight,
+	"\x1bOD": evLeft,
+	"\x1bOH": evHome,
+	"\x1bOF": evEnd,
 }
 
-// Control bytes and ASCII boundaries.
+// ASCII and control byte values shared by the decoder and the renderer.
 const (
 	byteCtrlA = 0x01
 	byteCtrlC = 0x03
@@ -94,9 +100,9 @@ const (
 	byteDel   = 0x7f
 	byteSpace = 0x20
 
-	// CSI sequences end with a byte in this range
-	byteCsiFinalMin = 0x40
-	byteCsiFinalMax = 0x7e
+	// A CSI sequence ends with a byte in this range.
+	csiFinalMin = 0x40
+	csiFinalMax = 0x7e
 )
 
 // keyDecoder turns raw terminal bytes into events.
@@ -104,49 +110,50 @@ const (
 // One Read can contain a partial UTF-8 rune, a partial escape sequence,
 // or several keys at once, so the decoder keeps unfinished bytes.
 type keyDecoder struct {
-	// pending holds bytes that do not form a complete key set.
+	// pending holds bytes that do not form a complete key yet.
 	pending []byte
 
 	// pasting is true between pasteStart and pasteEnd.
 	pasting bool
 }
 
-// decode appends chunk to pending and
-// returns every complete event it can decode.
+// decode appends chunk to pending and returns every complete event it can
+// decode.
 func (d *keyDecoder) decode(chunk []byte) []event {
 	d.pending = append(d.pending, chunk...)
 
 	var events []event
+
 	for len(d.pending) > 0 {
-		// Paste mode: consume everything up to pasteEnd
 		if d.pasting {
 			ev, ok := d.readPaste()
 			if !ok {
 				break
 			}
+
 			events = append(events, ev)
+
 			continue
 		}
 
-		// Decode one key
-		// Keep the rest for the next iteration
-		ev, n, incomplete := decodeOne(d.pending)
+		// The paste marker is decoder control, not a key event.
+		if bytes.HasPrefix(d.pending, pasteStartBytes) {
+			d.pending = d.pending[len(pasteStart):]
+			d.pasting = true
+
+			continue
+		}
+
+		ev, n, incomplete := decodeKey(d.pending)
 		if incomplete {
 			break
 		}
 
 		d.pending = d.pending[n:]
-
-		// Paste start is decoder control, not an editor event
-		if ev.kind == evPasteStart {
-			d.pasting = true
-			continue
-		}
-
 		events = append(events, ev)
 	}
 
-	// Drop the backing slice when idle
+	// Drop the backing slice when idle.
 	if len(d.pending) == 0 {
 		d.pending = nil
 	}
@@ -154,14 +161,17 @@ func (d *keyDecoder) decode(chunk []byte) []event {
 	return events
 }
 
-// readPaste returns 1 evPaste if pasteEnd is present.
+// readPaste returns one evPaste if the paste end marker is present.
+//
+// Each call scans the whole pending buffer, so a very large paste is
+// quadratic; pastes are small in practice.
 func (d *keyDecoder) readPaste() (event, bool) {
-	idx := bytes.Index(d.pending, []byte(pasteEnd))
+	idx := bytes.Index(d.pending, pasteEndBytes)
 	if idx < 0 {
 		return event{}, false
 	}
 
-	// Keep bytes after pasteEnd for normal decoding
+	// Keep bytes after pasteEnd for normal decoding.
 	text := normalizePaste(d.pending[:idx])
 	d.pending = d.pending[idx+len(pasteEnd):]
 	d.pasting = false
@@ -187,10 +197,10 @@ func (d *keyDecoder) flush() []event {
 	return events
 }
 
-// decodeOne decodes the first key in b.
-// n is the number of bytes consumed.
-// incomplete means b holds only part of a key.
-func decodeOne(b []byte) (event, int, bool) {
+// decodeKey decodes the first key in b, which must not be empty.
+// n is the number of bytes consumed; incomplete means b holds only part of a
+// key and should be retried with more bytes.
+func decodeKey(b []byte) (event, int, bool) {
 	switch b[0] {
 	case '\r', '\n':
 		return event{kind: evEnter}, 1, false
@@ -199,7 +209,7 @@ func decodeOne(b []byte) (event, int, bool) {
 	case byteCtrlH, byteDel:
 		return event{kind: evBackspace}, 1, false
 
-	// Control keys with dedicated events
+	// Control keys with dedicated events.
 	case byteCtrlC:
 		return event{kind: evInterrupt}, 1, false
 	case byteCtrlA:
@@ -207,21 +217,20 @@ func decodeOne(b []byte) (event, int, bool) {
 	case byteCtrlW:
 		return event{kind: evKillWordLeft}, 1, false
 
-	// Ctrl+d is ignored; only Ctrl+c cancels
+	// Ctrl+d is ignored; only Ctrl+c cancels.
 	case byteCtrlD:
 		return event{kind: evUnknown}, 1, false
 
-	// Escape sequences need their own parser
 	case byteEsc:
 		return decodeEscape(b)
 	}
 
-	// Ignore other control bytes
+	// Ignore other control bytes.
 	if b[0] < byteSpace {
 		return event{kind: evUnknown}, 1, false
 	}
 
-	// Printable ASCII
+	// Printable ASCII.
 	if b[0] < byteDel {
 		return event{kind: evRune, r: rune(b[0])}, 1, false
 	}
@@ -237,7 +246,9 @@ func decodeUTF8(b []byte) (event, int, bool) {
 		return event{kind: evRune, r: r}, size, false
 	}
 
-	// RuneError + size 1 means either a truncated run or invalid bytes
+	// RuneError with size 1 means either a truncated rune or invalid bytes.
+	// It is truncated only when the bytes cannot yet be a full rune and there
+	// is still room to add more.
 	if !utf8.FullRune(b) && len(b) < utf8.UTFMax {
 		return event{}, 0, true
 	}
@@ -256,38 +267,29 @@ func decodeEscape(b []byte) (event, int, bool) {
 		return decodeCSI(b)
 	case 'O':
 		return decodeSS3(b)
-
-	// ESC + normal byte
-	// Drop ESC and decode the byte normally
-	default:
-		return event{kind: evUnknown}, 1, false
 	}
+
+	// ESC followed by an ordinary byte: drop the ESC and let the next
+	// iteration decode the byte normally.
+	return event{kind: evUnknown}, 1, false
 }
 
 // decodeCSI decodes ESC [ ... final.
-// CSI sequences end with a byte in the range 0x40-0x7e.
 func decodeCSI(b []byte) (event, int, bool) {
 	for i := 2; i < len(b); i++ {
-		if b[i] < byteCsiFinalMin || b[i] > byteCsiFinalMax {
+		if !isCSIFinal(b[i]) {
 			continue
 		}
 
-		seq := string(b[:i+1])
-
-		// Paste start is handled by the decoder, not the editor
-		if seq == pasteStart {
-			return event{kind: evPasteStart}, i + 1, false
-		}
-
-		if kind, ok := escapeKind(seq); ok {
+		seq := b[:i+1]
+		if kind, ok := escapeSeqs[string(seq)]; ok {
 			return event{kind: kind}, i + 1, false
 		}
 
-		// Consumed unknown sequences so their bytes do not become text
 		return event{kind: evUnknown}, i + 1, false
 	}
 
-	// Incomplete sequence wait for more bytes
+	// Incomplete sequence: wait for more bytes.
 	return event{}, 0, true
 }
 
@@ -297,23 +299,15 @@ func decodeSS3(b []byte) (event, int, bool) {
 		return event{}, 0, true
 	}
 
-	seq := string(b[:3])
-	if kind, ok := escapeKind(seq); ok {
+	if kind, ok := escapeSeqs[string(b[:3])]; ok {
 		return event{kind: kind}, 3, false
 	}
 
 	return event{kind: evUnknown}, 3, false
 }
 
-// escapeKind looks up a known ANSI sequence.
-func escapeKind(seq string) (eventKind, bool) {
-	for _, known := range escapeSeqs {
-		if known.seq == seq {
-			return known.kind, true
-		}
-	}
-
-	return evUnknown, false
+func isCSIFinal(b byte) bool {
+	return b >= csiFinalMin && b <= csiFinalMax
 }
 
 // normalizePaste flattens pasted text to one line
@@ -324,24 +318,26 @@ func normalizePaste(b []byte) string {
 
 	for i := 0; i < len(b); i++ {
 		switch {
-		// CRLF becomes one space
+		// CRLF becomes one space.
 		case b[i] == '\r':
 			if i+1 < len(b) && b[i+1] == '\n' {
 				i++
 			}
+
 			sb.WriteByte(' ')
 
-		// Other line breaks and tabs becomes spaces
+		// Other line breaks and tabs become spaces.
 		case b[i] == '\n', b[i] == '\t':
 			sb.WriteByte(' ')
 
-		// Drop other control bytes
+		// Drop other control bytes.
 		case b[i] < byteSpace, b[i] == byteDel:
+
 		default:
 			sb.WriteByte(b[i])
 		}
 	}
 
-	// Remove invalid UTF-8
+	// Remove invalid UTF-8.
 	return strings.ToValidUTF8(sb.String(), "")
 }

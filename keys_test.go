@@ -208,10 +208,6 @@ func FuzzDecodeKeys(f *testing.F) {
 		events = append(events, d.flush()...)
 
 		for _, ev := range events {
-			if ev.kind == evPasteStart {
-				t.Fatal("evPasteStart leaked to caller")
-			}
-
 			if ev.kind == evRune && ev.r == 0 {
 				t.Fatal("rune event with zero rune")
 			}

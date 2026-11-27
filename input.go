@@ -8,19 +8,22 @@ import (
 	"strings"
 )
 
-var ErrCanceled = errors.New("miniprompt: canceled")
-
+// Input asks the user for one line of text.
+//
+// The zero value works and uses the default markers.
 type Input struct {
-	Marker      Marker
-	Label       string
-	Placeholder string
-	Validate    func(string) error
-}
+	// Marker customises the pending, done and fail glyphs.
+	Marker Marker
 
-type Marker struct {
-	Pending string
-	Done    string
-	Fail    string
+	// Label is shown before the input.
+	Label string
+
+	// Placeholder is a dim hint shown while the line is empty.
+	Placeholder string
+
+	// Validate, when set, is called on submit. Returning an error keeps
+	// the prompt open and shows the message under it.
+	Validate func(string) error
 }
 
 // inputWidget adapts Input to the prompt driver.
@@ -33,7 +36,7 @@ func newInputWidget(in Input) *inputWidget {
 	return &inputWidget{in: in}
 }
 
-func (w *inputWidget) view(int) frame {
+func (w *inputWidget) view(_ int) frame {
 	return w.in.pendingFrame(&w.ed)
 }
 
@@ -87,17 +90,17 @@ func (w *inputWidget) final(v string) []string {
 	return []string{w.in.doneLine(v)}
 }
 
+// Run prompts on os.Stdin and os.Stdout.
 func (in Input) Run() (string, error) {
 	return in.RunWith(os.Stdin, os.Stdout)
 }
 
 // RunWith reads from r and writes to w.
-// It uses live mode when both are terminals,
-// plain mode otherwise.
+// It uses live mode when both are terminals, plain mode otherwise.
 func (in Input) RunWith(r io.Reader, w io.Writer) (string, error) {
 	rf, wf, ok := terminalFiles(r, w)
 	if ok {
-		return liveSession(rf, wf, widget[string](newInputWidget(in)))
+		return liveSession[string](rf, wf, newInputWidget(in))
 	}
 
 	return in.runPlainMode(r, w)
@@ -126,9 +129,11 @@ func (in Input) promptText() string {
 	return markerText(in.Marker.Pending, "?") + in.Label + " "
 }
 
+// check runs the optional validator.
 func (in Input) check(value string) error {
 	if in.Validate == nil {
 		return nil
 	}
+
 	return in.Validate(value)
 }

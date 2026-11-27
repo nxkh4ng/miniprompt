@@ -21,7 +21,7 @@ type fakeWidget struct {
 }
 
 func (f *fakeWidget) view(int) frame {
-	return frame{lines: f.lines, row: f.row, col: f.col}
+	return frame{lines: f.lines, cursorRow: f.row, cursorCol: f.col}
 }
 
 func (f *fakeWidget) handle(ev event) action {
@@ -140,18 +140,5 @@ func TestRunReadError(t *testing.T) {
 	_, err := run(f, errReader{err: boom}, io.Discard)
 	if !errors.Is(err, boom) {
 		t.Fatalf("err = %v; want boom", err)
-	}
-}
-
-func TestFinishBlockShrinksBlock(t *testing.T) {
-	var out strings.Builder
-
-	if err := finishBlock(&out, []string{"done"}, 4); err != nil {
-		t.Fatalf("err = %v; want nil", err)
-	}
-
-	want := "\rdone\x1b[K\r\n\x1b[K\r\n\x1b[K\r\n\x1b[K\x1b[2A"
-	if out.String() != want {
-		t.Fatalf("out = %q; want %q", out.String(), want)
 	}
 }

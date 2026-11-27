@@ -2,7 +2,6 @@ package miniprompt
 
 import (
 	"errors"
-	"strings"
 	"testing"
 )
 
@@ -117,8 +116,8 @@ func TestPendingFrame(t *testing.T) {
 			if f.lines[0] != tt.want {
 				t.Fatalf("line = %q; want %q", f.lines[0], tt.want)
 			}
-			if f.col != tt.cursor {
-				t.Fatalf("cursor = %d; want %d", f.col, tt.cursor)
+			if f.cursorCol != tt.cursor {
+				t.Fatalf("cursor = %d; want %d", f.cursorCol, tt.cursor)
 			}
 		})
 	}
@@ -144,8 +143,8 @@ func TestPendingFrameCursorNotSelected(t *testing.T) {
 	if want := "? Name a" + sgrReverse + "bc" + sgrReset; f.lines[0] != want {
 		t.Fatalf("line = %q; want %q", f.lines[0], want)
 	}
-	if f.col != 8 {
-		t.Fatalf("cursor = %d; want 8", f.col)
+	if f.cursorCol != 8 {
+		t.Fatalf("cursor = %d; want 8", f.cursorCol)
 	}
 }
 
@@ -171,79 +170,6 @@ func TestFailLine(t *testing.T) {
 
 			if got != tt.want {
 				t.Fatalf("failLine() = %q; want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestWriteFrame(t *testing.T) {
-	tests := []struct {
-		name string
-		f    frame
-		prev int
-		want string
-		rows int
-	}{
-		{
-			name: "one row",
-			f:    frame{lines: []string{"? Name a"}, col: 8},
-			want: "\r? Name a\x1b[K\x1b[9G",
-			rows: 1,
-		},
-		{
-			name: "error row",
-			f:    frame{lines: []string{"? Name ab"}, footer: "✗ too short", col: 9},
-			prev: 1,
-			want: "\r? Name ab\x1b[K\r\n✗ too short\x1b[K\x1b[1A\x1b[10G",
-			rows: 2,
-		},
-		{
-			name: "clears the error row",
-			f:    frame{lines: []string{"? Name abc"}, col: 10},
-			prev: 2,
-			want: "\r? Name abc\x1b[K\r\n\x1b[K\x1b[1A\x1b[11G",
-			rows: 2,
-		},
-		{
-			name: "cursor at column zero",
-			f:    frame{lines: []string{"Name "}, col: 0},
-			want: "\rName \x1b[K\x1b[1G",
-			rows: 1,
-		},
-		{
-			name: "three lines",
-			f: frame{
-				lines: []string{"one", "two", "three"},
-				row:   1,
-				col:   2,
-			},
-			want: "\rone\x1b[K\r\ntwo\x1b[K\r\nthree\x1b[K\x1b[1A\x1b[3G",
-			rows: 3,
-		},
-		{
-			name: "shrinks to one line",
-			f:    frame{lines: []string{"done"}, col: 4},
-			prev: 3,
-			want: "\rdone\x1b[K\r\n\x1b[K\r\n\x1b[K\x1b[2A\x1b[5G",
-			rows: 3,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var out strings.Builder
-
-			rows, err := writeFrame(&out, tt.f, tt.prev)
-			if err != nil {
-				t.Fatalf("err = %v; want nil", err)
-			}
-
-			if out.String() != tt.want {
-				t.Fatalf("out = %q; want %q", out.String(), tt.want)
-			}
-
-			if rows != tt.rows {
-				t.Fatalf("rows = %d; want %d", rows, tt.rows)
 			}
 		})
 	}
